@@ -25,7 +25,14 @@ var _hole_container: Node3D
 var _foam_nodes: Array[MeshInstance3D] = []
 
 static func water_height_at(x: float, z: float, t: float) -> float:
-	return WATER_Y + sin(x * 0.18 + t * 0.9) * 0.07 + cos(z * 0.14 + t * 0.7) * 0.07
+	# EXACTLY the same 3 directional sine waves as shaders/water.gdshader
+	# (dirs / frequencies / speeds / amplitudes). Do not change one without
+	# the other, or buoyancy will drift away from the visual surface.
+	var h := 0.0
+	h += 0.140 * sin((x * 0.92 + z * 0.39) * 1.05 + t * 1.15)
+	h += 0.090 * sin((x * -0.52 + z * 0.86) * 1.65 + t * 1.55)
+	h += 0.045 * sin((x * 0.98 + z * -0.20) * 3.10 + t * 2.30)
+	return WATER_Y + h
 
 func _ready() -> void:
 	mass = 600.0
@@ -36,7 +43,8 @@ func _ready() -> void:
 	can_sleep = false
 	contact_monitor = false
 	_build_collision()
-	_build_hull()
+	_build_boat_model()
+	_build_interior_water()
 	_build_character()
 	_hole_container = Node3D.new()
 	_hole_container.name = "Holes"
@@ -74,14 +82,29 @@ func _cyl(parent: Node, radius: float, height: float, pos: Vector3, color: Color
 	parent.add_child(mi)
 	return mi
 
-func _sphere(parent: Node, radius: float, pos: Vector3, color: Color, scale_v: Vector3 = Vector3.ONE) -> MeshInstance3D:
+func _sphere(parent: Node, radius: float, pos: Vector3, color: Color, scale_v: Vector3 = Vector3.ONE, rough: float = 0.65) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = radius
 	sm.height = radius * 2.0
 	mi.mesh = sm
-	mi.material_override = _mat(color, 0.65)
+	mi.material_override = _mat(color, rough)
 	mi.position = pos
+	mi.scale = scale_v
+	parent.add_child(mi)
+	return mi
+
+func _capsule(parent: Node, radius: float, height: float, pos: Vector3, color: Color, rot_deg: Vector3 = Vector3.ZERO, scale_v: Vector3 = Vector3.ONE, rough: float = 0.55) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var cm := CapsuleMesh.new()
+	cm.radius = radius
+	cm.height = height
+	cm.radial_segments = 12
+	cm.rings = 6
+	mi.mesh = cm
+	mi.material_override = _mat(color, rough)
+	mi.position = pos
+	mi.rotation_degrees = rot_deg
 	mi.scale = scale_v
 	parent.add_child(mi)
 	return mi
@@ -94,49 +117,81 @@ func _build_collision() -> void:
 	cs.position = Vector3(0, 0.62, 0)
 	add_child(cs)
 
-func _build_hull() -> void:
-	var white := Color(0.88, 0.89, 0.90)
-	var white2 := Color(0.78, 0.80, 0.81)
-	var deck_c := Color(0.66, 0.68, 0.68)
-	# 船底
-	_box(self, Vector3(1.95, 0.22, 5.55), Vector3(0, 0.22, -0.15), white2)
-	# 左右の舷側 (少し外開き)
-	_box(self, Vector3(0.16, 0.95, 5.9), Vector3(-1.06, 0.78, -0.05), white, Vector3(0, 0, -6))
-	_box(self, Vector3(0.16, 0.95, 5.9), Vector3(1.06, 0.78, -0.05), white, Vector3(0, 0, 6))
-	# 船尾トランサム
-	_box(self, Vector3(2.25, 0.95, 0.16), Vector3(0, 0.78, -3.0), white)
-	# 船首: 左右を寄せた2枚 + 前面パネル
-	_box(self, Vector3(0.16, 0.95, 1.7), Vector3(-0.72, 0.78, 3.25), white, Vector3(0, 38, -6))
-	_box(self, Vector3(0.16, 0.95, 1.7), Vector3(0.72, 0.78, 3.25), white, Vector3(0, -38, 6))
-	_box(self, Vector3(1.05, 0.9, 0.16), Vector3(0, 0.76, 3.95), white)
-	# ガンネル (上縁レール)
-	_box(self, Vector3(0.24, 0.09, 6.0), Vector3(-1.08, 1.28, -0.05), white, Vector3(0, 0, -6))
-	_box(self, Vector3(0.24, 0.09, 6.0), Vector3(1.08, 1.28, -0.05), white, Vector3(0, 0, 6))
-	_box(self, Vector3(2.3, 0.09, 0.24), Vector3(0, 1.28, -3.0), white)
-	# 内側デッキ床
-	_box(self, Vector3(1.95, 0.07, 5.7), Vector3(0, 0.42, 0.1), deck_c)
-	# 船首デッキ (写真の白い前甲板 + オレンジのハッチ)
-	_box(self, Vector3(1.85, 0.09, 1.55), Vector3(0, 1.16, 3.05), white)
-	_box(self, Vector3(0.62, 0.10, 0.85), Vector3(0, 1.24, 3.0), Color(0.78, 0.36, 0.07))
-	# 後部ベンチ + 木箱 (写真中央の茶色い箱)
-	_box(self, Vector3(1.85, 0.42, 0.55), Vector3(0, 0.66, 1.55), white2)
-	_box(self, Vector3(0.85, 0.30, 0.45), Vector3(0.15, 0.82, 1.55), Color(0.58, 0.35, 0.13))
-	# センターコンソール + 風防 + ハンドル
-	_box(self, Vector3(0.85, 0.85, 0.55), Vector3(0, 0.85, 0.35), white)
-	var shield := _box(self, Vector3(0.85, 0.55, 0.05), Vector3(0, 1.55, 0.52), Color(0.55, 0.8, 0.85, 0.45), Vector3(-18, 0, 0))
-	var sm := shield.material_override as StandardMaterial3D
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_cyl(self, 0.20, 0.06, Vector3(-0.25, 1.22, 0.02), Color(0.12, 0.12, 0.13), Vector3(70, 0, 0))
-	_box(self, Vector3(0.34, 0.24, 0.06), Vector3(0.18, 1.28, 0.10), Color(0.10, 0.13, 0.16))
-	# 船尾ベンチ
-	_box(self, Vector3(1.85, 0.35, 0.5), Vector3(0, 0.62, -2.55), white2)
-	# 釣り竿 2本 (船尾から斜め上)
-	_cyl(self, 0.016, 1.7, Vector3(-0.55, 1.75, -2.80), Color(0.08, 0.08, 0.09), Vector3(16, 0, 6))
-	_cyl(self, 0.016, 1.9, Vector3(-0.33, 1.85, -2.80), Color(0.08, 0.08, 0.09), Vector3(19, 0, 3))
-	# 手すり (船首)
-	_cyl(self, 0.03, 1.5, Vector3(0, 1.62, 3.55), Color(0.75, 0.78, 0.8), Vector3(0, 0, 90))
-	_cyl(self, 0.025, 0.35, Vector3(-0.72, 1.45, 3.55), Color(0.75, 0.78, 0.8))
-	_cyl(self, 0.025, 0.35, Vector3(0.72, 1.45, 3.55), Color(0.75, 0.78, 0.8))
+func _boat_pbr(name: String, color: Color, rough: float, metallic: float = 0.0, rough_tex: Texture2D = null) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.resource_name = name
+	m.albedo_color = color
+	m.roughness = rough
+	m.metallic = metallic
+	if rough_tex:
+		m.roughness_texture = rough_tex
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+var _boat_mats: Dictionary = {}
+
+func _get_boat_mats() -> Dictionary:
+	if not _boat_mats.is_empty():
+		return _boat_mats
+	var nt := NoiseTexture2D.new()
+	nt.width = 256
+	nt.height = 256
+	nt.seamless = true
+	var fn := FastNoiseLite.new()
+	fn.noise_type = FastNoiseLite.TYPE_PERLIN
+	fn.frequency = 0.06
+	nt.noise = fn
+	var gel := _boat_pbr("HullWhite", Color(0.93, 0.95, 0.96), 0.62, 0.0, nt)
+	_boat_mats["HullWhite"] = gel
+	_boat_mats["ConsoleWhite"] = _boat_pbr("ConsoleWhite", Color(0.91, 0.93, 0.94), 0.62, 0.0, nt)
+	_boat_mats["HullBottom"] = _boat_pbr("HullBottom", Color(0.04, 0.11, 0.14), 0.50)
+	_boat_mats["DeckGray"] = _boat_pbr("DeckGray", Color(0.58, 0.61, 0.61), 0.92, 0.0, nt)
+	_boat_mats["VinylTeal"] = _boat_pbr("VinylTeal", Color(0.0, 0.45, 0.48), 0.55)
+	_boat_mats["WoodBrown"] = _boat_pbr("WoodBrown", Color(0.48, 0.29, 0.14), 0.85, 0.0, nt)
+	_boat_mats["CrateDark"] = _boat_pbr("CrateDark", Color(0.30, 0.18, 0.08), 0.88)
+	_boat_mats["OrangeHatch"] = _boat_pbr("OrangeHatch", Color(0.80, 0.30, 0.02), 0.50)
+	_boat_mats["MetalRail"] = _boat_pbr("MetalRail", Color(0.78, 0.80, 0.82), 0.30, 0.90)
+	_boat_mats["BlackParts"] = _boat_pbr("BlackParts", Color(0.04, 0.045, 0.05), 0.55, 0.20)
+	_boat_mats["MotorDark"] = _boat_pbr("MotorDark", Color(0.07, 0.08, 0.09), 0.42, 0.35)
+	var glass := _boat_pbr("GlassWindshield", Color(0.25, 0.55, 0.65, 0.38), 0.08, 0.10)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_boat_mats["GlassWindshield"] = glass
+	for nav in [["NavRed", Color(0.90, 0.05, 0.05)], ["NavGreen", Color(0.05, 0.85, 0.25)]]:
+		var nm := _boat_pbr(nav[0], nav[1], 0.40)
+		nm.emission_enabled = true
+		nm.emission = nav[1]
+		nm.emission_energy_multiplier = 2.0
+		_boat_mats[nav[0]] = nm
+	return _boat_mats
+
+func _build_boat_model() -> void:
+	# Blender-authored boat (tools/build_boat_model.py -> assets/boat.obj).
+	# OBJ is text so it survives the GitHub snapshot push; surfaces are named
+	# after the Blender materials and get rich PBR overrides here.
+	var mesh := load("res://assets/boat.obj") as Mesh
+	if mesh == null:
+		push_warning("boat.obj failed to load; boat will be invisible")
+		return
+	var mi := MeshInstance3D.new()
+	mi.name = "BoatModel"
+	mi.mesh = mesh
+	add_child(mi)
+	var mats := _get_boat_mats()
+	var keys: Array = mats.keys()
+	for i in mesh.get_surface_count():
+		var sname := ""
+		if mesh is ArrayMesh:
+			sname = (mesh as ArrayMesh).surface_get_name(i)
+		var existing := mesh.surface_get_material(i)
+		var hay := sname
+		if existing:
+			hay += "|" + existing.resource_name
+		for k in keys:
+			if hay.contains(k):
+				mi.set_surface_override_material(i, mats[k])
+				break
+
+func _build_interior_water() -> void:
 	# 船内の溜まり水 (浸水で上昇する透明な水面) — 子供なので船と一緒に傾く
 	_interior_water = _box(self, Vector3(1.88, 0.06, 5.55), Vector3(0, 0.47, 0.05), Color(0.15, 0.75, 0.82, 0.78))
 	var wm := _interior_water.material_override as StandardMaterial3D
@@ -146,6 +201,7 @@ func _build_hull() -> void:
 
 func _build_character() -> void:
 	# 写真の男性: 船尾に立ち船首を向く。上半身裸・赤い水着・金髪寄りの短髪。
+	# v2: 手足と胴は CapsuleMesh で丸みを持たせた (旧版は円柱)。
 	var man := Node3D.new()
 	man.name = "Man"
 	man.position = Vector3(-0.42, 0.46, -1.88)
@@ -154,26 +210,25 @@ func _build_character() -> void:
 	add_child(man)
 	var skin := Color(0.76, 0.50, 0.35)
 	var skin2 := Color(0.70, 0.45, 0.31)
-	# 脚 (膝下は浸水で水の中に入る)
-	_cyl(man, 0.075, 0.62, Vector3(-0.13, 0.31, 0), skin2)
-	_cyl(man, 0.075, 0.62, Vector3(0.14, 0.31, 0.02), skin2)
+	# 脚 (カプセル)
+	_capsule(man, 0.078, 0.66, Vector3(-0.13, 0.33, 0), skin2)
+	_capsule(man, 0.078, 0.66, Vector3(0.14, 0.33, 0.02), skin2)
 	# 赤い水着 (横縞つき)
 	_box(man, Vector3(0.44, 0.36, 0.30), Vector3(0, 0.78, 0), Color(0.78, 0.16, 0.20))
 	_box(man, Vector3(0.45, 0.05, 0.31), Vector3(0, 0.86, 0), Color(0.92, 0.88, 0.85))
 	_box(man, Vector3(0.45, 0.04, 0.31), Vector3(0, 0.70, 0), Color(0.92, 0.88, 0.85))
-	# 上半身 (裸の背中がカメラ側 = -Z)
-	var torso := _cyl(man, 0.20, 0.62, Vector3(0, 1.27, 0), skin)
-	torso.scale = Vector3(1.18, 1.0, 0.75)
-	_sphere(man, 0.19, Vector3(0, 1.585, 0), skin, Vector3(1.2, 0.38, 0.78)) # 肩
-	# 腕 (体の横に下ろす・少し太く)
-	_cyl(man, 0.068, 0.62, Vector3(-0.315, 1.20, 0.0), skin2, Vector3(0, 0, 6))
-	_cyl(man, 0.068, 0.62, Vector3(0.325, 1.20, 0.03), skin2, Vector3(-5, 0, -8))
-	_sphere(man, 0.07, Vector3(-0.345, 0.88, 0.02), skin2) # 手
-	_sphere(man, 0.07, Vector3(0.365, 0.88, 0.06), skin2)
+	# 上半身 (裸の背中がカメラ側 = -Z): カプセルの胴 + 肩
+	_capsule(man, 0.205, 0.74, Vector3(0, 1.28, 0), skin, Vector3.ZERO, Vector3(1.18, 1.0, 0.76))
+	_sphere(man, 0.19, Vector3(0, 1.60, 0), skin, Vector3(1.2, 0.38, 0.78), 0.55) # 肩
+	# 腕 (カプセル, 体の横に下ろす)
+	_capsule(man, 0.066, 0.64, Vector3(-0.315, 1.20, 0.0), skin2, Vector3(0, 0, 6))
+	_capsule(man, 0.066, 0.64, Vector3(0.325, 1.20, 0.03), skin2, Vector3(-5, 0, -8))
+	_sphere(man, 0.07, Vector3(-0.345, 0.88, 0.02), skin2, Vector3.ONE, 0.55) # 手
+	_sphere(man, 0.07, Vector3(0.365, 0.88, 0.06), skin2, Vector3.ONE, 0.55)
 	# 首・頭 + 髪 (金髪寄り)
-	_cyl(man, 0.06, 0.12, Vector3(0, 1.66, 0.01), skin2)
-	_sphere(man, 0.145, Vector3(0, 1.83, 0.01), skin)
-	_sphere(man, 0.15, Vector3(0, 1.885, -0.02), Color(0.62, 0.48, 0.26), Vector3(1.0, 0.60, 1.0))
+	_capsule(man, 0.06, 0.16, Vector3(0, 1.67, 0.01), skin2)
+	_sphere(man, 0.145, Vector3(0, 1.84, 0.01), skin, Vector3.ONE, 0.55)
+	_sphere(man, 0.15, Vector3(0, 1.895, -0.02), Color(0.62, 0.48, 0.26), Vector3(1.0, 0.60, 1.0), 0.7)
 
 # ---------------------------------------------------------------- 被弾
 func register_hit(world_pos: Vector3, world_normal: Vector3) -> void:
