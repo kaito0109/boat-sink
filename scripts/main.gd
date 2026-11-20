@@ -264,10 +264,15 @@ func _build_hud() -> void:
 	add_child(layer)
 	var panel := PanelContainer.new()
 	panel.position = Vector2(14, 12)
+	# HUDは表示専用: タップを一切奪わない (v2.1 — 照準ラベル等が
+	# 指の下に来て _unhandled_input に届かない事故の修正)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(panel)
 	var vb := VBoxContainer.new()
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(vb)
 	var title := Label.new()
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title.text = "撃つと浸水して沈む船 — Godot再現"
 	title.add_theme_font_size_override("font_size", 20)
 	if font: title.add_theme_font_override("font", font)
@@ -275,6 +280,7 @@ func _build_hud() -> void:
 	hud_holes = _hud_label(vb, font, "穴: 0")
 	hud_flood = _hud_label(vb, font, "浸水: 0%")
 	hud_bar = ProgressBar.new()
+	hud_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud_bar.min_value = 0
 	hud_bar.max_value = 100
 	hud_bar.value = 0
@@ -285,6 +291,7 @@ func _build_hud() -> void:
 	help.add_theme_font_size_override("font_size", 13)
 	# ボタン (下部)
 	var hb := HBoxContainer.new()
+	hb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hb.position = Vector2(14, 640)
 	layer.add_child(hb)
 	var b1 := Button.new()
@@ -305,12 +312,14 @@ func _build_hud() -> void:
 	# 照準 (マウス位置の + )
 	var cross := Label.new()
 	cross.name = "Crosshair"
+	cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	cross.text = "+"
 	cross.add_theme_font_size_override("font_size", 22)
 	layer.add_child(cross)
 
 func _hud_label(parent: Node, font: Font, txt: String) -> Label:
 	var l := Label.new()
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.text = txt
 	l.add_theme_font_size_override("font_size", 16)
 	if font: l.add_theme_font_override("font", font)
@@ -331,7 +340,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_drag_moved = 0.0
 				_press_pos = mb.position
 			else:
-				if _dragging and _drag_moved < 8.0:
+				# タップ判定は「押した場所からの距離」で決める (指の微振動で
+				# 累積移動量が膨らみ、タップが回転扱いになる事故を防ぐ)
+				if _dragging and mb.position.distance_to(_press_pos) < 20.0:
 					shoot_at_screen(mb.position)
 				_dragging = false
 		elif mb.button_index == MOUSE_BUTTON_RIGHT:
@@ -340,7 +351,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mm := event as InputEventMouseMotion
 		if _dragging or _orbiting:
 			_drag_moved += mm.relative.length()
-			if _drag_moved >= 8.0 or _orbiting:
+			if _drag_moved >= 20.0 or _orbiting:
 				cam_yaw -= mm.relative.x * 0.005
 				cam_pitch = clampf(cam_pitch + mm.relative.y * 0.004, 0.12, 1.25)
 	elif event is InputEventKey:
@@ -351,8 +362,15 @@ func _unhandled_input(event: InputEvent) -> void:
 func shoot_at_screen(screen_pos: Vector2) -> bool:
 	var from := camera.project_ray_origin(screen_pos)
 	var dir := camera.project_ray_normal(screen_pos)
-	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 120.0, 2)
+	# 第1優先: 見た目メッシュの当たり判定 (layer 4 の Area3D)
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 120.0, 4)
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
 	var result := get_world_3d().direct_space_state.intersect_ray(query)
+	if result.is_empty():
+		# フォールバック: 従来の箱コリジョン (layer 2)
+		var q2 := PhysicsRayQueryParameters3D.create(from, from + dir * 120.0, 2)
+		result = get_world_3d().direct_space_state.intersect_ray(q2)
 	if result.is_empty():
 		return false
 	var pos: Vector3 = result["position"]

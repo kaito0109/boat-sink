@@ -190,6 +190,21 @@ func _build_boat_model() -> void:
 			if hay.contains(k):
 				mi.set_surface_override_material(i, mats[k])
 				break
+	# 射撃の当たり判定は見た目メッシュそのものに合わせる (v2.1)。
+	# 旧仕様は大きな箱コリジョンに当たっていたため、上から撃つと
+	# 「狙った舷側」ではなく箱の上面に穴が開いて見えた。
+	var area := Area3D.new()
+	area.name = "HitArea"
+	area.collision_layer = 4
+	area.collision_mask = 0
+	area.monitoring = false
+	area.monitorable = true
+	var cs := CollisionShape3D.new()
+	var shape := ConcavePolygonShape3D.new()
+	shape.set_faces(mesh.get_faces())
+	cs.shape = shape
+	area.add_child(cs)
+	mi.add_child(area)
 
 func _build_interior_water() -> void:
 	# 船内の溜まり水 (浸水で上昇する透明な水面) — 子供なので船と一緒に傾く
